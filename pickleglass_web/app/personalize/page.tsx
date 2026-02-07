@@ -21,9 +21,8 @@ export default function PersonalizePage() {
         setAllPresets(presetsData);
         
         if (presetsData.length > 0) {
-          const firstUserPreset = presetsData.find(p => p.is_default === 0) || presetsData[0];
-          setSelectedPreset(firstUserPreset);
-          setEditorContent(firstUserPreset.prompt);
+          setSelectedPreset(presetsData[0]);
+          setEditorContent(presetsData[0].prompt);
         }
       } catch (error) {
         console.error("Failed to fetch presets:", error);
@@ -51,11 +50,6 @@ export default function PersonalizePage() {
 
   const handleSave = async () => {
     if (!selectedPreset || saving || !isDirty) return;
-    
-    if (selectedPreset.is_default === 1) {
-        alert("Default presets cannot be modified.");
-        return;
-    }
     
     try {
       setSaving(true);
@@ -96,7 +90,6 @@ export default function PersonalizePage() {
         uid: 'current_user',
         title,
         prompt: "Enter your custom prompt here...",
-        is_default: 0,
         created_at: Date.now(),
         sync_state: 'clean'
       };
@@ -131,7 +124,6 @@ export default function PersonalizePage() {
         uid: 'current_user',
         title,
         prompt: editorContent,
-        is_default: 0,
         created_at: Date.now(),
         sync_state: 'clean'
       };
@@ -185,7 +177,7 @@ export default function PersonalizePage() {
               )}
               <button
                 onClick={handleSave}
-                disabled={saving || !isDirty || selectedPreset?.is_default === 1}
+                disabled={saving || !isDirty}
                 className={`px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 ${
                   !isDirty && !saving
                     ? 'bg-gray-500 text-white cursor-default'
@@ -230,11 +222,6 @@ export default function PersonalizePage() {
                     }
                   `}
                 >
-                  {preset.is_default === 1 && (
-                    <div className="absolute top-2 right-2 bg-yellow-100 text-yellow-800 text-xs px-2 py-1 rounded-full">
-                      Default
-                    </div>
-                  )}
                   <h3 className="font-semibold text-gray-900 mb-3 text-center text-sm">
                     {preset.title}
                   </h3>
@@ -250,23 +237,11 @@ export default function PersonalizePage() {
 
       <div className="flex-1 bg-white">
         <div className="h-full px-8 py-6 flex flex-col">
-          {selectedPreset?.is_default === 1 && (
-            <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 bg-yellow-400 rounded-full"></div>
-                <p className="text-sm text-yellow-800">
-                  <strong>This is a default preset and cannot be edited.</strong> 
-                  Use the "Duplicate" button above to create an editable copy, or create a new preset.
-                </p>
-              </div>
-            </div>
-          )}
           <textarea
             value={editorContent}
             onChange={handleEditorChange}
             className="w-full flex-1 text-sm text-gray-900 border-0 resize-none focus:outline-none bg-transparent font-mono leading-relaxed"
             placeholder="Select a preset or type directly..."
-            readOnly={selectedPreset?.is_default === 1}
           />
         </div>
       </div>

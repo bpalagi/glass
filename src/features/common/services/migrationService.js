@@ -36,7 +36,7 @@ async function checkAndRunMigration(firebaseUser) {
         let phase1OpCount = 0;
         const phase1Promises = [];
         
-        const localPresets = (await sqlitePresetRepo.getPresets(firebaseUser.uid)).filter(p => !p.is_default);
+        const localPresets = await sqlitePresetRepo.getPresets(firebaseUser.uid);
         console.log(`[Migration Phase 1] Found ${localPresets.length} custom presets.`);
         for (const preset of localPresets) {
             const presetRef = doc(db, 'prompt_presets', preset.id);
@@ -44,7 +44,7 @@ async function checkAndRunMigration(firebaseUser) {
                 uid: preset.uid,
                 title: encryptionService.encrypt(preset.title ?? ''),
                 prompt: encryptionService.encrypt(preset.prompt ?? ''),
-                is_default: preset.is_default ?? 0,
+                is_default: 0,
                 created_at: preset.created_at ? Timestamp.fromMillis(preset.created_at * 1000) : null,
                 updated_at: preset.updated_at ? Timestamp.fromMillis(preset.updated_at * 1000) : null
             };

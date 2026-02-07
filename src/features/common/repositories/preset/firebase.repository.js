@@ -5,50 +5,20 @@ const encryptionService = require('../../services/encryptionService');
 
 const userPresetConverter = createEncryptedConverter(['prompt', 'title']);
 
-const defaultPresetConverter = {
-    toFirestore: (data) => data,
-    fromFirestore: (snapshot, options) => {
-        const data = snapshot.data(options);
-        return { ...data, id: snapshot.id };
-    }
-};
-
 function userPresetsCol() {
     const db = getFirestoreInstance();
     return collection(db, 'prompt_presets').withConverter(userPresetConverter);
 }
 
-function defaultPresetsCol() {
-    const db = getFirestoreInstance();
-    // Path must have an odd number of segments. 'v1' is a placeholder document.
-    return collection(db, 'defaults/v1/prompt_presets').withConverter(defaultPresetConverter);
-}
-
 async function getPresets(uid) {
     const userPresetsQuery = query(userPresetsCol(), where('uid', '==', uid));
-    const defaultPresetsQuery = query(defaultPresetsCol()); // Defaults have no owner
-
-    const [userSnapshot, defaultSnapshot] = await Promise.all([
-        getDocs(userPresetsQuery),
-        getDocs(defaultPresetsQuery)
-    ]);
-
-    const presets = [
-        ...defaultSnapshot.docs.map(d => d.data()),
-        ...userSnapshot.docs.map(d => d.data())
-    ];
-
-    return presets.sort((a, b) => {
-        if (a.is_default && !b.is_default) return -1;
-        if (!a.is_default && b.is_default) return 1;
-        return a.title.localeCompare(b.title);
-    });
+    const snapshot = await getDocs(userPresetsQuery);
+    const presets = snapshot.docs.map(d => d.data());
+    return presets.sort((a, b) => a.title.localeCompare(b.title));
 }
 
 async function getPresetTemplates() {
-    const q = query(defaultPresetsCol(), orderBy('title', 'asc'));
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => doc.data());
+    return [];
 }
 
 async function create({ uid, title, prompt }) {
@@ -68,7 +38,7 @@ async function update(id, { title, prompt }, uid) {
     const docRef = doc(userPresetsCol(), id);
     const docSnap = await getDoc(docRef);
 
-    if (!docSnap.exists() || docSnap.data().uid !== uid || docSnap.data().is_default) {
+    if (!docSnap.exists() || docSnap.data().uid !== uid) {
         throw new Error("Preset not found or permission denied to update.");
     }
 
@@ -90,7 +60,7 @@ async function del(id, uid) {
     const docRef = doc(userPresetsCol(), id);
     const docSnap = await getDoc(docRef);
 
-    if (!docSnap.exists() || docSnap.data().uid !== uid || docSnap.data().is_default) {
+    if (!docSnap.exists() || docSnap.data().uid !== uid) {
         throw new Error("Preset not found or permission denied to delete.");
     }
 

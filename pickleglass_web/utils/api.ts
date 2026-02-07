@@ -73,7 +73,6 @@ export interface PromptPreset {
   uid: string;
   title: string;
   prompt: string;
-  is_default: 0 | 1;
   created_at: number;
   sync_state: 'clean' | 'dirty';
 }
@@ -164,7 +163,6 @@ const convertFirestorePreset = (preset: { id: string } & FirestorePromptPreset, 
     uid,
     title: preset.title,
     prompt: preset.prompt,
-    is_default: preset.isDefault ? 1 : 0,
     created_at: timestampToUnix(preset.createdAt),
     sync_state: 'clean'
   };
@@ -495,8 +493,7 @@ export const createPreset = async (data: { title: string, prompt: string }): Pro
     const uid = firebaseAuth.currentUser!.uid;
     const presetId = await FirestorePromptPresetService.createPreset(uid, {
       title: data.title,
-      prompt: data.prompt,
-      isDefault: false
+      prompt: data.prompt
     });
     return { id: presetId };
   } else {
@@ -575,15 +572,10 @@ export const getBatchData = async (includes: ('profile' | 'presets' | 'sessions'
 };
 
 export const logout = async () => {
-  if (isFirebaseMode()) {
-    const { signOut } = await import('firebase/auth');
-    await signOut(firebaseAuth);
-  }
-  
   setUserInfo(null);
   
   localStorage.removeItem('openai_api_key');
   localStorage.removeItem('user_info');
   
-  window.location.href = '/login';
+  window.location.href = '/';
 }; 

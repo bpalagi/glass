@@ -60,7 +60,6 @@ export interface FirestoreSummary {
 export interface FirestorePromptPreset {
   title: string;
   prompt: string;
-  isDefault: boolean;
   createdAt: Timestamp;
 }
 

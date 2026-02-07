@@ -4,8 +4,8 @@ function getPresets(uid) {
     const db = sqliteClient.getDb();
     const query = `
         SELECT * FROM prompt_presets 
-        WHERE uid = ? OR is_default = 1 
-        ORDER BY is_default DESC, title ASC
+        WHERE uid = ? 
+        ORDER BY title ASC
     `;
     
     try {
@@ -17,19 +17,7 @@ function getPresets(uid) {
 }
 
 function getPresetTemplates() {
-    const db = sqliteClient.getDb();
-    const query = `
-        SELECT * FROM prompt_presets 
-        WHERE is_default = 1 
-        ORDER BY title ASC
-    `;
-    
-    try {
-        return db.prepare(query).all() || [];
-    } catch (err) {
-        console.error('SQLite: Failed to get preset templates:', err);
-        throw err;
-    }
+    return [];
 }
 
 function createPreset({ uid, title, prompt }) {
@@ -56,13 +44,13 @@ function updatePreset(id, { title, prompt }, uid) {
     const query = `
         UPDATE prompt_presets 
         SET title = ?, prompt = ?, sync_state = 'dirty', updated_at = ?
-        WHERE id = ? AND uid = ? AND is_default = 0
+        WHERE id = ? AND uid = ?
     `;
     
     try {
         const result = db.prepare(query).run(title, prompt, now, id, uid);
         if (result.changes === 0) {
-            throw new Error('Preset not found, is default, or permission denied');
+            throw new Error('Preset not found or permission denied');
         }
         return { changes: result.changes };
     } catch (err) {
@@ -75,13 +63,13 @@ function deletePreset(id, uid) {
     const db = sqliteClient.getDb();
     const query = `
         DELETE FROM prompt_presets 
-        WHERE id = ? AND uid = ? AND is_default = 0
+        WHERE id = ? AND uid = ?
     `;
     
     try {
         const result = db.prepare(query).run(id, uid);
         if (result.changes === 0) {
-            throw new Error('Preset not found, is default, or permission denied');
+            throw new Error('Preset not found or permission denied');
         }
         return { changes: result.changes };
     } catch (err) {

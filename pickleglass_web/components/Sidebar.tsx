@@ -4,8 +4,8 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { useState, createElement, useEffect, useMemo, useCallback, memo } from 'react';
-import { Search, Activity, HelpCircle, ChevronDown, User, LogOut, LucideIcon } from 'lucide-react';
-import { logout, UserProfile, checkApiKeyStatus } from '@/utils/api';
+import { Search, Activity, HelpCircle, ChevronDown, User, LucideIcon } from 'lucide-react';
+import { checkApiKeyStatus } from '@/utils/api';
 import { useAuth } from '@/utils/auth';
 
 const ANIMATION_DURATION = {
@@ -223,14 +223,6 @@ const SidebarComponent = ({ isCollapsed, onToggle, onSearchClick }: SidebarProps
         }
     }, [pathname]);
 
-    const handleLogout = useCallback(async () => {
-        try {
-            await logout();
-        } catch (error) {
-            console.error('An error occurred during logout:', error);
-        }
-    }, []);
-
     const handleKeyDown = useCallback((event: React.KeyboardEvent, action?: () => void) => {
         if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
@@ -349,42 +341,6 @@ const SidebarComponent = ({ isCollapsed, onToggle, onSearchClick }: SidebarProps
                                         </Link>
                                     </li>
                                 ))}
-                                <li role="none">
-                                    {isFirebaseUser ? (
-                                        <button
-                                            onClick={handleLogout}
-                                            onKeyDown={e => handleKeyDown(e, handleLogout)}
-                                            className={`
-                                    group flex items-center rounded-lg px-[12px] py-[8px] text-[13px] gap-x-[9px]
-                                    text-red-600 hover:text-red-700 hover:bg-[#f7f7f7] w-full 
-                                    transition-colors duration-${ANIMATION_DURATION.COLOR_TRANSITION} ease-out
-                                    focus:outline-none
-                                  `}
-                                            style={{ willChange: 'background-color, color' }}
-                                            role="menuitem"
-                                            aria-label="Logout"
-                                        >
-                                            <LogOut className="h-4 w-4 shrink-0" aria-hidden="true" />
-                                            <span className="whitespace-nowrap">Logout</span>
-                                        </button>
-                                    ) : (
-                                        <Link
-                                            href="/login"
-                                            className={`
-                                    group flex items-center rounded-lg px-[12px] py-[8px] text-[13px] gap-x-[9px] 
-                                    text-[#282828] hover:text-[#282828] hover:bg-[#f7f7f7] w-full 
-                                    transition-colors duration-${ANIMATION_DURATION.COLOR_TRANSITION} ease-out
-                                    focus:outline-none
-                                  `}
-                                            style={{ willChange: 'background-color, color' }}
-                                            role="menuitem"
-                                            aria-label="Login"
-                                        >
-                                            <LogOut className="h-3.5 w-3.5 shrink-0 transform -scale-x-100" aria-hidden="true" />
-                                            <span className="whitespace-nowrap">Login</span>
-                                        </Link>
-                                    )}
-                                </li>
                             </ul>
                         </div>
                     </li>
@@ -424,7 +380,6 @@ const SidebarComponent = ({ isCollapsed, onToggle, onSearchClick }: SidebarProps
             isCollapsed,
             isSettingsExpanded,
             toggleSettings,
-            handleLogout,
             handleKeyDown,
             getUniformTextStyle,
             getTextContainerStyle,
@@ -443,8 +398,6 @@ const SidebarComponent = ({ isCollapsed, onToggle, onSearchClick }: SidebarProps
         return userInfo?.display_name ? userInfo.display_name.charAt(0).toUpperCase() : 'G';
     }, [userInfo, authLoading]);
 
-    const isFirebaseUser = userInfo && userInfo.uid !== 'default_user';
-
     return (
         <aside
             className={`flex h-full flex-col bg-white border-r py-3 px-2 border-[#e5e5e5] relative ${isCollapsed ? 'w-[60px]' : 'w-[220px]'}`}
@@ -455,7 +408,7 @@ const SidebarComponent = ({ isCollapsed, onToggle, onSearchClick }: SidebarProps
         >
             <header className={`group relative h-6 flex shrink-0 items-center justify-between`}>
                 {isCollapsed ? (
-                    <Link href="https://pickle.com" target="_blank" rel="noopener noreferrer" className="flex items-center">
+                    <Link href="https://x.com/UncappedTokens" target="_blank" rel="noopener noreferrer" className="flex items-center">
                         <Image src="/symbol.svg" alt="Logo" width={20} height={20} className="mx-3 shrink-0" />
                         <button
                             onClick={toggleSidebar}
@@ -470,9 +423,9 @@ const SidebarComponent = ({ isCollapsed, onToggle, onSearchClick }: SidebarProps
                     </Link>
                 ) : (
                     <>
-                        <Link href="https://pickle.com" target="_blank" rel="noopener noreferrer" className="flex items-center">
+                        <Link href="https://x.com/UncappedTokens" target="_blank" rel="noopener noreferrer" className="flex items-center">
                             <Image
-                                src={isCollapsed ? '/symbol.svg' : '/word.svg'}
+                                src='/symbol.svg'
                                 alt="pickleglass Logo"
                                 width={50}
                                 height={14}
@@ -548,11 +501,7 @@ const SidebarComponent = ({ isCollapsed, onToggle, onSearchClick }: SidebarProps
                         aria-label={`User: ${getUserDisplayName()}`}
                         onKeyDown={e =>
                             handleKeyDown(e, () => {
-                                if (isFirebaseUser) {
-                                    router.push('/settings');
-                                } else {
-                                    router.push('/login');
-                                }
+                                router.push('/settings');
                             })
                         }
                     >
