@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { useState, createElement, useEffect, useMemo, useCallback, memo } from 'react';
-import { Search, Activity, HelpCircle, Download, ChevronDown, User, Shield, Database, CreditCard, LogOut, LucideIcon } from 'lucide-react';
+import { Search, Activity, HelpCircle, ChevronDown, User, LogOut, LucideIcon } from 'lucide-react';
 import { logout, UserProfile, checkApiKeyStatus } from '@/utils/api';
 import { useAuth } from '@/utils/auth';
 
@@ -208,35 +208,10 @@ const SidebarComponent = ({ isCollapsed, onToggle, onSearchClick }: SidebarProps
     const settingsSubmenu = useMemo<SubmenuItem[]>(
         () => [
             { name: 'Personal Profile', href: '/settings', icon: '/user.svg', isLucide: false, ariaLabel: 'Personal profile settings' },
-            { name: 'Data & privacy', href: '/settings/privacy', icon: '/privacy.svg', isLucide: false, ariaLabel: 'Data and privacy settings' },
-            { name: 'Billing', href: '/settings/billing', icon: '/credit-card.svg', isLucide: false, ariaLabel: 'Billing settings' },
         ],
         []
     );
 
-    const bottomItems = useMemo(
-        () => [
-            {
-                href: 'https://discord.gg/UCZH5B5Hpd',
-                icon: '/linkout.svg',
-                text: 'Join Discord',
-                ariaLabel: 'Help Center (new window)',
-            },
-            {
-                href: 'https://www.dropbox.com/scl/fi/esk4h8z45sryvbremy57v/Pickle_latest.dmg?rlkey=92y535bz6p6gov6vd17x6q53b&st=9kl0annj&dl=1',
-                icon: '/download.svg',
-                text: 'Download Pickle Camera',
-                ariaLabel: 'Download Pickle Camera (new window)',
-            },
-            {
-                href: 'hhttps://www.dropbox.com/scl/fi/znid09apxiwtwvxer6oc9/Glass_latest.dmg?rlkey=gwvvyb3bizkl25frhs4k1zwds&st=37q31b4w&dl=1',
-                icon: '/download.svg',
-                text: 'Download Pickle Glass',
-                ariaLabel: 'Download Pickle Glass (new window)',
-            },
-        ],
-        []
-    );
 
     const toggleSidebar = useCallback(() => {
         onToggle(!isCollapsed);
@@ -548,43 +523,7 @@ const SidebarComponent = ({ isCollapsed, onToggle, onSearchClick }: SidebarProps
                     </div>
                 )}
 
-                <div className="mt-auto space-y-[0px]" role="navigation" aria-label="Additional links">
-                    {bottomItems.map((item, index) => (
-                        <Link
-                            key={item.text}
-                            href={item.href}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className={`
-                group flex items-center rounded-[6px] px-[12px] py-[8px] text-[13px] text-[#282828]
-                hover:text-[#282828] hover:bg-[#f7f7f7] ${isCollapsed ? '' : 'gap-x-[10px]'}
-                transition-colors duration-${ANIMATION_DURATION.COLOR_TRANSITION} ease-out 
-                focus:outline-none
-              `}
-                            title={isCollapsed ? item.text : undefined}
-                            aria-label={item.ariaLabel}
-                            style={{ willChange: 'background-color, color' }}
-                        >
-                            <div className=" overflow-hidden">
-                                <span className="" style={getUniformTextStyle()}>
-                                    {item.text}
-                                </span>
-                            </div>
-                            <div className="shrink-0 flex items-center justify-center w-4 h-4">
-                                <IconComponent
-                                    icon={item.icon}
-                                    isLucide={false}
-                                    alt={`${item.text} icon`}
-                                    className={`h-[16px] w-[16px] transition-transform duration-${ANIMATION_DURATION.ICON_HOVER}`}
-                                />
-                            </div>
-                        </Link>
-                    ))}
-                </div>
-
-                <div className="mt-[0px] flex items-center w-full h-[1px] px-[4px] mt-[8px] mb-[8px]">
-                    <div className="w-full h-[1px] bg-[#d9d9d9]"></div>
-                </div>
+                <div className="mt-auto"></div>
 
                 <div
                     className={`mt-[0px] flex items-center ${isCollapsed ? '' : 'gap-x-[10px]'}`}

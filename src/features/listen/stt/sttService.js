@@ -4,6 +4,36 @@ const { createSTT } = require('../../common/ai/factory');
 const modelStateService = require('../../common/services/modelStateService');
 
 const COMPLETION_DEBOUNCE_MS = 2000;
+// Whisper emits complete sentences — use a shorter debounce for faster display
+const WHISPER_DEBOUNCE_MS = 500;
+
+// ── Whisper noise / hallucination filter ─────────────────────────────────────────
+const WHISPER_NOISE_TAGS = [
+    '[BLANK_AUDIO]', '[INAUDIBLE]', '[MUSIC]', '[SOUND]', '[NOISE]', '[SILENCE]',
+    '(BLANK_AUDIO)', '(INAUDIBLE)', '(MUSIC)', '(SOUND)', '(NOISE)', '(SILENCE)',
+];
+const WHISPER_HALLUCINATION_EXACT = new Set([
+    'thank you.', 'thanks for watching.', 'thanks for watching!',
+    'thank you for watching.', 'thank you for watching!',
+    'subscribe', 'subscribe.', 'like and subscribe.',
+    'please subscribe.', 'you', 'you.', 'bye.', 'bye',
+    'the end.', 'the end', 'so', 'so.', 'okay.', 'okay',
+    'hmm.', 'hmm', 'uh', 'uh.', 'um', 'um.',
+    '...', '…', '.', 'i\'m sorry.',
+]);
+
+function isWhisperNoise(text) {
+    if (!text || text.length <= 2) return true;
+    const lower = text.toLowerCase().trim();
+    // Check exact hallucination matches
+    if (WHISPER_HALLUCINATION_EXACT.has(lower)) return true;
+    // Check noise tags (substring match)
+    if (WHISPER_NOISE_TAGS.some(tag => text.includes(tag))) return true;
+    // Detect repetitive single-word loops (e.g. "you you you you")
+    const words = lower.replace(/[.,!?]/g, '').split(/\s+/).filter(Boolean);
+    if (words.length >= 3 && new Set(words).size === 1) return true;
+    return false;
+}
 
 // ── New heartbeat / renewal constants ────────────────────────────────────────────
 // Interval to send low-cost keep-alive messages so the remote service does not
@@ -144,7 +174,8 @@ class SttService {
             this.myCompletionBuffer += (this.myCompletionBuffer ? ' ' : '') + text;
         }
 
-        this.myCompletionTimer = setTimeout(() => this.flushMyCompletion(), COMPLETION_DEBOUNCE_MS);
+        const delay = this.modelInfo?.provider === 'whisper' ? WHISPER_DEBOUNCE_MS : COMPLETION_DEBOUNCE_MS;
+        this.myCompletionTimer = setTimeout(() => this.flushMyCompletion(), delay);
     }
 
     debounceTheirCompletion(text) {
@@ -164,7 +195,8 @@ class SttService {
             this.theirCompletionBuffer += (this.theirCompletionBuffer ? ' ' : '') + text;
         }
 
-        this.theirCompletionTimer = setTimeout(() => this.flushTheirCompletion(), COMPLETION_DEBOUNCE_MS);
+        const delay = this.modelInfo?.provider === 'whisper' ? WHISPER_DEBOUNCE_MS : COMPLETION_DEBOUNCE_MS;
+        this.theirCompletionTimer = setTimeout(() => this.flushTheirCompletion(), delay);
     }
 
     async initializeSttSessions(language = 'en') {
@@ -189,26 +221,7 @@ class SttService {
                 if (message.text && message.text.trim()) {
                     const finalText = message.text.trim();
                     
-                    // Filter out Whisper noise transcriptions
-                    const noisePatterns = [
-                        '[BLANK_AUDIO]',
-                        '[INAUDIBLE]',
-                        '[MUSIC]',
-                        '[SOUND]',
-                        '[NOISE]',
-                        '(BLANK_AUDIO)',
-                        '(INAUDIBLE)',
-                        '(MUSIC)',
-                        '(SOUND)',
-                        '(NOISE)'
-                    ];
-                    
-                    const isNoise = noisePatterns.some(pattern => 
-                        finalText.includes(pattern) || finalText === pattern
-                    );
-                    
-                    
-                    if (!isNoise && finalText.length > 2) {
+                    if (!isWhisperNoise(finalText)) {
                         this.debounceMyCompletion(finalText);
                     } else {
                         console.log(`[Whisper-Me] Filtered noise: "${finalText}"`);
@@ -323,26 +336,7 @@ class SttService {
                     const finalText = message.text.trim();
                     
                     // Filter out Whisper noise transcriptions
-                    const noisePatterns = [
-                        '[BLANK_AUDIO]',
-                        '[INAUDIBLE]',
-                        '[MUSIC]',
-                        '[SOUND]',
-                        '[NOISE]',
-                        '(BLANK_AUDIO)',
-                        '(INAUDIBLE)',
-                        '(MUSIC)',
-                        '(SOUND)',
-                        '(NOISE)'
-                    ];
-                    
-                    const isNoise = noisePatterns.some(pattern => 
-                        finalText.includes(pattern) || finalText === pattern
-                    );
-                    
-                    
-                    // Only process if it's not noise, not a false positive, and has meaningful content
-                    if (!isNoise && finalText.length > 2) {
+                    if (!isWhisperNoise(finalText)) {
                         this.debounceTheirCompletion(finalText);
                     } else {
                         console.log(`[Whisper-Them] Filtered noise: "${finalText}"`);
@@ -438,10 +432,43 @@ class SttService {
             }
         };
 
+        const handleMyPartial = (message) => {
+            if (!this.modelInfo) return;
+            const text = (message.text || '').trim();
+            if (!text || isWhisperNoise(text)) return;
+            const display = (this.myCompletionBuffer + (this.myCompletionBuffer ? ' ' : '') + text).trim();
+            if (display) {
+                this.sendToRenderer('stt-update', {
+                    speaker: 'Me',
+                    text: display,
+                    isPartial: true,
+                    isFinal: false,
+                    timestamp: Date.now(),
+                });
+            }
+        };
+
+        const handleTheirPartial = (message) => {
+            if (!this.modelInfo) return;
+            const text = (message.text || '').trim();
+            if (!text || isWhisperNoise(text)) return;
+            const display = (this.theirCompletionBuffer + (this.theirCompletionBuffer ? ' ' : '') + text).trim();
+            if (display) {
+                this.sendToRenderer('stt-update', {
+                    speaker: 'Them',
+                    text: display,
+                    isPartial: true,
+                    isFinal: false,
+                    timestamp: Date.now(),
+                });
+            }
+        };
+
         const mySttConfig = {
             language: effectiveLanguage,
             callbacks: {
                 onmessage: handleMyMessage,
+                onpartial: handleMyPartial,
                 onerror: error => console.error('My STT session error:', error.message),
                 onclose: event => console.log('My STT session closed:', event.reason),
             },
@@ -451,6 +478,7 @@ class SttService {
             language: effectiveLanguage,
             callbacks: {
                 onmessage: handleTheirMessage,
+                onpartial: handleTheirPartial,
                 onerror: error => console.error('Their STT session error:', error.message),
                 onclose: event => console.log('Their STT session closed:', event.reason),
             },
@@ -728,7 +756,10 @@ class SttService {
 
         for (let i = 0; i < samples; i++) {
             const leftSample = stereoBuffer.readInt16LE(i * 4);
-            monoBuffer.writeInt16LE(leftSample, i * 2);
+            const rightSample = stereoBuffer.readInt16LE(i * 4 + 2);
+            // Average both channels to preserve audio from either side
+            const mono = (leftSample + rightSample) >> 1;
+            monoBuffer.writeInt16LE(mono, i * 2);
         }
 
         return monoBuffer;

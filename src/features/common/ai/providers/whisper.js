@@ -18,42 +18,75 @@ if (typeof window === 'undefined') {
 const INPUT_SAMPLE_RATE = 24000;
 const TARGET_SAMPLE_RATE = 16000;
 
+// Client-side VAD: RMS energy threshold for silence detection
+const VAD_ENERGY_THRESHOLD = 0.003;
+// Allow this many consecutive silence chunks through so server VAD detects end-of-speech
+const VAD_SILENCE_GRACE_CHUNKS = 8;
+
+// Single-pole IIR low-pass filter coefficient for anti-alias before downsampling.
+// Cutoff at target Nyquist (8 kHz) relative to input rate (24 kHz).
+// alpha = 1 - e^(-2π * fc / fs)  ≈ 0.874 for fc=8000, fs=24000
+const LP_ALPHA = 1 - Math.exp(-2 * Math.PI * (TARGET_SAMPLE_RATE / 2) / INPUT_SAMPLE_RATE);
+
 function resampleAndConvertToFloat32(pcmInt16Buffer) {
     const numInputSamples = pcmInt16Buffer.length / 2;
+
+    // Anti-alias low-pass filter (in-place on float representation)
+    const filtered = new Float32Array(numInputSamples);
+    let prev = pcmInt16Buffer.readInt16LE(0) / 32768.0;
+    filtered[0] = prev;
+    for (let i = 1; i < numInputSamples; i++) {
+        const raw = pcmInt16Buffer.readInt16LE(i * 2) / 32768.0;
+        prev += LP_ALPHA * (raw - prev);
+        filtered[i] = prev;
+    }
+
+    // Downsample with linear interpolation
     const ratio = TARGET_SAMPLE_RATE / INPUT_SAMPLE_RATE;
     const numOutputSamples = Math.floor(numInputSamples * ratio);
     const float32 = new Float32Array(numOutputSamples);
 
     for (let i = 0; i < numOutputSamples; i++) {
-        // Linear interpolation for resampling
         const srcIdx = i / ratio;
         const idx0 = Math.floor(srcIdx);
         const idx1 = Math.min(idx0 + 1, numInputSamples - 1);
         const frac = srcIdx - idx0;
 
-        const s0 = pcmInt16Buffer.readInt16LE(idx0 * 2) / 32768.0;
-        const s1 = pcmInt16Buffer.readInt16LE(idx1 * 2) / 32768.0;
-        float32[i] = s0 + (s1 - s0) * frac;
+        float32[i] = filtered[idx0] + (filtered[idx1] - filtered[idx0]) * frac;
     }
 
     return Buffer.from(float32.buffer);
 }
 
 class WhisperSTTSession extends EventEmitter {
-    constructor(model, whisperService, sessionId) {
+    constructor(model, whisperService, sessionId, language) {
         super();
         this.model = model;
         this.whisperService = whisperService;
         this.sessionId = sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        // Always enforce English — no language detection overhead
+        this.language = 'en';
         this.ws = null;
         this.isRunning = false;
         this.serverReady = false;
         this.uid = this.sessionId;
         this.emittedCompletedCount = 0;
         this.lastEmittedText = '';
+        this.lastPartialText = '';
+        this.consecutiveSilenceChunks = 0;
+        this._closedIntentionally = false;
+        this._reconnectAttempts = 0;
+        this._maxReconnectAttempts = 5;
+        this._reconnectTimer = null;
     }
 
     async initialize() {
+        // Reset segment tracking — server starts fresh on each connection
+        this.emittedCompletedCount = 0;
+        this.lastEmittedText = '';
+        this.lastPartialText = '';
+        this.consecutiveSilenceChunks = 0;
+
         try {
             // Ensure the WhisperLive server is running
             if (!this.whisperService.isLiveServerRunning()) {
@@ -80,6 +113,13 @@ class WhisperSTTSession extends EventEmitter {
                         task: 'transcribe',
                         model: this._mapModelName(this.model),
                         use_vad: true,
+                        // Initial prompt biases decoder toward English conversational speech
+                        // and suppresses common hallucination patterns
+                        initial_prompt: 'This is a conversation in English.',
+                        // Server-side tuning for speed + quality
+                        no_speech_thresh: 0.3,          // Lower = fewer false silence drops
+                        same_output_threshold: 3,        // Finalize repeated segments faster
+                        send_last_n_segments: 5,         // Less data per WS message
                     };
                     this.ws.send(JSON.stringify(config));
                     console.log(`[WhisperSTT-${this.sessionId}] Connected, sent config: ${JSON.stringify(config)}`);
@@ -112,10 +152,17 @@ class WhisperSTTSession extends EventEmitter {
                 this.ws.on('close', (code, reason) => {
                     clearTimeout(timeout);
                     console.log(`[WhisperSTT-${this.sessionId}] WebSocket closed: ${code} ${reason}`);
+                    const wasReady = this.serverReady;
                     this.isRunning = false;
                     this.serverReady = false;
-                    this.emit('close', { code, reason: reason?.toString() });
-                    if (!this.serverReady) reject(new Error(`WebSocket closed: ${code}`));
+                    if (!wasReady) {
+                        reject(new Error(`WebSocket closed: ${code}`));
+                    } else if (!this._closedIntentionally) {
+                        // Unexpected close — attempt reconnection
+                        this._scheduleReconnect();
+                    } else {
+                        this.emit('close', { code, reason: reason?.toString() });
+                    }
                 });
             });
         } catch (error) {
@@ -126,14 +173,15 @@ class WhisperSTTSession extends EventEmitter {
     }
 
     _mapModelName(model) {
-        // Map Glass model IDs to faster-whisper model names
+        // Map Glass model IDs to faster-whisper English-only model names.
+        // The .en variants are smaller, faster, and higher quality for English.
         const map = {
-            'whisper-tiny': 'tiny',
-            'whisper-base': 'base',
-            'whisper-small': 'small',
-            'whisper-medium': 'medium',
+            'whisper-tiny': 'tiny.en',
+            'whisper-base': 'base.en',
+            'whisper-small': 'small.en',
+            'whisper-medium': 'medium.en',
         };
-        return map[model] || 'small';
+        return map[model] || 'small.en';
     }
 
     _handleServerMessage(msg) {
@@ -148,8 +196,16 @@ class WhisperSTTSession extends EventEmitter {
         }
 
         if (msg.message === 'DISCONNECT') {
-            console.log(`[WhisperSTT-${this.sessionId}] Server requested disconnect`);
-            this.close();
+            console.log(`[WhisperSTT-${this.sessionId}] Server requested disconnect — will reconnect`);
+            this.isRunning = false;
+            this.serverReady = false;
+            if (this.ws) {
+                // Remove listeners before closing to avoid stale promise rejection
+                this.ws.removeAllListeners();
+                try { this.ws.close(); } catch (_) {}
+                this.ws = null;
+            }
+            this._scheduleReconnect();
             return;
         }
 
@@ -177,6 +233,27 @@ class WhisperSTTSession extends EventEmitter {
                 }
             }
             this.emittedCompletedCount = completedSegments.length;
+
+            // Emit partial (interim) result from the latest non-completed segment
+            const pendingSegments = msg.segments.filter(s => !s.completed);
+            if (pendingSegments.length > 0) {
+                const latest = pendingSegments[pendingSegments.length - 1];
+                const partialText = (latest.text || '').trim();
+                if (partialText && partialText !== this.lastPartialText) {
+                    this.lastPartialText = partialText;
+                    this.emit('partial', {
+                        text: partialText,
+                        timestamp: Date.now(),
+                        sessionId: this.sessionId,
+                    });
+                }
+            } else {
+                // All segments completed — clear partial
+                if (this.lastPartialText) {
+                    this.lastPartialText = '';
+                    this.emit('partial', { text: '', timestamp: Date.now(), sessionId: this.sessionId });
+                }
+            }
         }
 
         if (msg.language) {
@@ -208,6 +285,22 @@ class WhisperSTTSession extends EventEmitter {
         // Convert PCM int16 24kHz → float32 16kHz
         const float32Buf = resampleAndConvertToFloat32(audioData);
 
+        // Client-side VAD: compute RMS energy of the float32 samples
+        const f32 = new Float32Array(float32Buf.buffer, float32Buf.byteOffset, float32Buf.byteLength / 4);
+        let sumSq = 0;
+        for (let i = 0; i < f32.length; i++) sumSq += f32[i] * f32[i];
+        const rms = Math.sqrt(sumSq / f32.length);
+
+        if (rms < VAD_ENERGY_THRESHOLD) {
+            this.consecutiveSilenceChunks++;
+            // Let a few silence chunks through so server VAD can detect end-of-speech
+            if (this.consecutiveSilenceChunks > VAD_SILENCE_GRACE_CHUNKS) {
+                return; // Skip sending pure silence
+            }
+        } else {
+            this.consecutiveSilenceChunks = 0;
+        }
+
         try {
             this.ws.send(float32Buf);
         } catch (err) {
@@ -215,9 +308,43 @@ class WhisperSTTSession extends EventEmitter {
         }
     }
 
+    _scheduleReconnect() {
+        if (this._closedIntentionally) return;
+        if (this._reconnectAttempts >= this._maxReconnectAttempts) {
+            console.error(`[WhisperSTT-${this.sessionId}] Max reconnect attempts reached, giving up`);
+            this.emit('close', { code: 1006, reason: 'Max reconnect attempts exceeded' });
+            return;
+        }
+
+        const delay = Math.min(1000 * Math.pow(2, this._reconnectAttempts), 16000);
+        this._reconnectAttempts++;
+        console.log(`[WhisperSTT-${this.sessionId}] Reconnecting in ${delay}ms (attempt ${this._reconnectAttempts}/${this._maxReconnectAttempts})`);
+
+        this._reconnectTimer = setTimeout(async () => {
+            try {
+                const result = await this.initialize();
+                if (result) {
+                    console.log(`[WhisperSTT-${this.sessionId}] Reconnected successfully`);
+                    this._reconnectAttempts = 0;
+                } else {
+                    this._scheduleReconnect();
+                }
+            } catch (err) {
+                console.error(`[WhisperSTT-${this.sessionId}] Reconnect failed:`, err.message);
+                this._scheduleReconnect();
+            }
+        }, delay);
+    }
+
     async close() {
         console.log(`[WhisperSTT-${this.sessionId}] Closing session`);
+        this._closedIntentionally = true;
         this.isRunning = false;
+
+        if (this._reconnectTimer) {
+            clearTimeout(this._reconnectTimer);
+            this._reconnectTimer = null;
+        }
 
         if (this.ws) {
             try {
@@ -264,7 +391,8 @@ class WhisperProvider {
         
         // Create unique session ID based on type
         const sessionId = `${sessionType}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-        const session = new WhisperSTTSession(model, this.whisperService, sessionId);
+        const language = config.language || 'en';
+        const session = new WhisperSTTSession(model, this.whisperService, sessionId, language);
         
         // Log session creation
         console.log(`[WhisperProvider] Created session: ${sessionId}`);
@@ -277,6 +405,9 @@ class WhisperProvider {
         if (config.callbacks) {
             if (config.callbacks.onmessage) {
                 session.on('transcription', config.callbacks.onmessage);
+            }
+            if (config.callbacks.onpartial) {
+                session.on('partial', config.callbacks.onpartial);
             }
             if (config.callbacks.onerror) {
                 session.on('error', config.callbacks.onerror);

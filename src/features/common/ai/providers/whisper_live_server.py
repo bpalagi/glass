@@ -9,7 +9,7 @@ from whisper_live.server import TranscriptionServer
 def main():
     parser = argparse.ArgumentParser(description="WhisperLive Server for Glass")
     parser.add_argument("--port", type=int, default=9090, help="WebSocket port")
-    parser.add_argument("--model", type=str, default="small", help="Whisper model size")
+    parser.add_argument("--model", type=str, default="small.en", help="Whisper model size (use .en suffix for English-only)")
     args = parser.parse_args()
 
     server = TranscriptionServer()

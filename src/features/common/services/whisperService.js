@@ -668,7 +668,7 @@ class WhisperService extends EventEmitter {
         }
     }
 
-    async startLiveServer(model = 'small') {
+    async startLiveServer(model = 'small.en') {
         if (this.isLiveServerRunning()) {
             console.log('[WhisperService] WhisperLive server already running');
             return;
@@ -688,7 +688,7 @@ class WhisperService extends EventEmitter {
         }
     }
 
-    async _doStartLiveServer(model = 'small') {
+    async _doStartLiveServer(model = 'small.en') {
         await this.ensureLiveVenv();
 
         const pythonPath = path.join(this.liveVenvPath, 'bin', 'python3');
