@@ -57,6 +57,17 @@ const PROVIDERS = {
       ],
       sttModels: [],
   },
+  'zen': {
+      name: 'OpenCode Zen',
+      handler: () => require("./providers/zen"),
+      llmModels: [
+          { id: 'opencode/big-pickle', name: 'Big Pickle' },
+          { id: 'opencode/gpt-5.2-codex', name: 'GPT 5.2 Codex' },
+          { id: 'opencode/claude-sonnet-4-5', name: 'Claude Sonnet 4.5' },
+          { id: 'opencode/gemini-3-pro', name: 'Gemini 3 Pro' },
+      ],
+      sttModels: [],
+  },
   'deepgram': {
     name: 'Deepgram',
     handler: () => require("./providers/deepgram"),
@@ -156,6 +167,7 @@ function getProviderClass(providerId) {
         'openai': 'OpenAIProvider',
         'anthropic': 'AnthropicProvider',
         'gemini': 'GeminiProvider',
+        'zen': 'ZenProvider',
         'deepgram': 'DeepgramProvider',
         'ollama': 'OllamaProvider',
         'whisper': 'WhisperProvider'
