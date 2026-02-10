@@ -11,6 +11,12 @@ class SummaryService {
         this.analysisHistory = [];
         this.conversationHistory = [];
         this.currentSessionId = null;
+
+        this.turnsBetweenAnalysis = 3;
+        this.lastAnalyzedConversationLength = 0;
+        this.analysisInProgress = false;
+        this.analysisPending = false;
+        this.analysisRunId = 0;
         
         // Callbacks
         this.onAnalysisComplete = null;
@@ -53,6 +59,11 @@ class SummaryService {
         this.conversationHistory = [];
         this.previousAnalysisResult = null;
         this.analysisHistory = [];
+
+        this.lastAnalyzedConversationLength = 0;
+        this.analysisInProgress = false;
+        this.analysisPending = false;
+        this.analysisRunId = 0;
         console.log('🔄 Conversation history and analysis state reset');
     }
 
@@ -182,7 +193,10 @@ Keep all points concise and build upon previous analysis if provided.`,
             return structuredData;
         } catch (error) {
             console.error('❌ Error during analysis generation:', error.message);
-            return this.previousAnalysisResult; // 에러 시 이전 결과 반환
+            if (this.onStatusUpdate) {
+                this.onStatusUpdate('Analysis failed.');
+            }
+            return null;
         }
     }
 
@@ -303,20 +317,56 @@ Keep all points concise and build upon previous analysis if provided.`,
      * Triggers analysis when conversation history reaches 5 texts.
      */
     async triggerAnalysisIfNeeded() {
-        if (this.conversationHistory.length >= 5 && this.conversationHistory.length % 5 === 0) {
-            console.log(`Triggering analysis - ${this.conversationHistory.length} conversation texts accumulated`);
+        const interval = this.turnsBetweenAnalysis || 3;
+        const currentLength = this.conversationHistory.length;
 
-            const data = await this.makeOutlineAndRequests(this.conversationHistory);
+        if (currentLength < interval) return;
+        const targetLength = Math.floor(currentLength / interval) * interval;
+        if (targetLength <= this.lastAnalyzedConversationLength) return;
+
+        if (this.analysisInProgress) {
+            this.analysisPending = true;
+            return;
+        }
+
+        this.analysisInProgress = true;
+        this.analysisPending = false;
+
+        const snapshot = [...this.conversationHistory];
+        const snapshotLength = snapshot.length;
+        const targetLengthForRun = Math.floor(snapshotLength / interval) * interval;
+        const runId = ++this.analysisRunId;
+
+        console.log(`Triggering analysis #${runId} - ${snapshotLength} conversation texts accumulated (milestone: ${targetLengthForRun})`);
+
+        try {
+            const data = await this.makeOutlineAndRequests(snapshot);
             if (data) {
+                data.meta = {
+                    conversationLength: snapshotLength,
+                    milestoneConversationLength: targetLengthForRun,
+                    analysisRunId: runId,
+                    createdAt: Date.now(),
+                };
+
                 console.log('Sending structured data to renderer');
                 this.sendToRenderer('summary-update', data);
-                
+
                 // Notify callback
                 if (this.onAnalysisComplete) {
                     this.onAnalysisComplete(data);
                 }
+
+                this.lastAnalyzedConversationLength = targetLengthForRun;
             } else {
                 console.log('No analysis data returned');
+            }
+        } finally {
+            this.analysisInProgress = false;
+            if (this.analysisPending) {
+                this.analysisPending = false;
+                // Re-check in case new turns arrived while analysis was running
+                this.triggerAnalysisIfNeeded();
             }
         }
     }

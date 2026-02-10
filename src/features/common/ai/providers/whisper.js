@@ -71,6 +71,7 @@ class WhisperSTTSession extends EventEmitter {
         this.serverReady = false;
         this.uid = this.sessionId;
         this.emittedCompletedCount = 0;
+        this.emittedCompletedKeys = new Set();
         this.lastEmittedText = '';
         this.lastPartialText = '';
         this.consecutiveSilenceChunks = 0;
@@ -83,6 +84,7 @@ class WhisperSTTSession extends EventEmitter {
     async initialize() {
         // Reset segment tracking — server starts fresh on each connection
         this.emittedCompletedCount = 0;
+        this.emittedCompletedKeys.clear();
         this.lastEmittedText = '';
         this.lastPartialText = '';
         this.consecutiveSilenceChunks = 0;
@@ -184,6 +186,27 @@ class WhisperSTTSession extends EventEmitter {
         return map[model] || 'small.en';
     }
 
+    _getSegmentKey(seg) {
+        if (!seg) return null;
+
+        if (seg.id !== undefined && seg.id !== null) {
+            return `id:${seg.id}`;
+        }
+
+        if (seg.start === undefined || seg.start === null || seg.end === undefined || seg.end === null) {
+            return null;
+        }
+
+        const start = Number(seg.start);
+        const end = Number(seg.end);
+
+        if (Number.isFinite(start) && Number.isFinite(end)) {
+            return `${start.toFixed(3)}-${end.toFixed(3)}`;
+        }
+
+        return null;
+    }
+
     _handleServerMessage(msg) {
         if (msg.message === 'SERVER_READY') {
             console.log(`[WhisperSTT-${this.sessionId}] Server ready (backend: ${msg.backend || 'unknown'})`);
@@ -213,24 +236,30 @@ class WhisperSTTSession extends EventEmitter {
             // WhisperLive sends ALL segments each time (including old completed ones).
             // Only emit newly completed segments we haven't seen before.
             const completedSegments = msg.segments.filter(s => s.completed);
-            const newCompleted = completedSegments.slice(this.emittedCompletedCount);
 
-            for (const seg of newCompleted) {
+            for (const seg of completedSegments) {
                 const text = (seg.text || '').trim();
-                if (text && text !== this.lastEmittedText) {
-                    this.lastEmittedText = text;
-                    console.log(`[WhisperSTT-${this.sessionId}] Transcription: "${text}"`);
-                    this.emit('transcription', {
-                        text: text,
-                        timestamp: Date.now(),
-                        confidence: 1.0,
-                        sessionId: this.sessionId,
-                        start: seg.start,
-                        end: seg.end,
-                    });
+                if (!text) continue;
+
+                const key = this._getSegmentKey(seg);
+                if (key) {
+                    if (this.emittedCompletedKeys.has(key)) continue;
+                    this.emittedCompletedKeys.add(key);
                 } else if (text === this.lastEmittedText) {
                     console.log(`[WhisperSTT-${this.sessionId}] Skipped duplicate: "${text}"`);
+                    continue;
                 }
+
+                this.lastEmittedText = text;
+                console.log(`[WhisperSTT-${this.sessionId}] Transcription: "${text}"`);
+                this.emit('transcription', {
+                    text: text,
+                    timestamp: Date.now(),
+                    confidence: 1.0,
+                    sessionId: this.sessionId,
+                    start: seg.start,
+                    end: seg.end,
+                });
             }
             this.emittedCompletedCount = completedSegments.length;
 
